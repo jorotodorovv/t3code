@@ -133,8 +133,35 @@ const installationError = (operation: string, detail: string, cause?: unknown) =
     ...(cause === undefined ? {} : { cause }),
   });
 
-const wrapFailure = (operation: string, detail: string) => (cause: unknown) =>
-  isInstallationError(cause) ? cause : installationError(operation, detail, cause);
+function extractErrorMessage(cause: unknown): string | undefined {
+  if (!cause) return undefined;
+  if (typeof cause === "string") return cause.trim() || undefined;
+  if (typeof cause === "object") {
+    if (
+      "detail" in cause &&
+      typeof (cause as { detail?: unknown }).detail === "string" &&
+      (cause as { detail: string }).detail.trim().length > 0
+    ) {
+      return (cause as { detail: string }).detail.trim();
+    }
+    if (
+      "message" in cause &&
+      typeof (cause as { message?: unknown }).message === "string" &&
+      (cause as { message: string }).message.trim().length > 0
+    ) {
+      return (cause as { message: string }).message.trim();
+    }
+  }
+  return undefined;
+}
+
+const wrapFailure = (operation: string, detail: string) => (cause: unknown) => {
+  if (isInstallationError(cause)) return cause;
+  const underlying = extractErrorMessage(cause);
+  const enrichedDetail =
+    underlying && !detail.includes(underlying) ? `${detail} (${underlying})` : detail;
+  return installationError(operation, enrichedDetail, cause);
+};
 
 function executableNames(platform: NodeJS.Platform) {
   return platform === "win32"

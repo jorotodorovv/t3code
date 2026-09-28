@@ -471,6 +471,7 @@ export const make = (
           ...(options.spawn.env ? { env: options.spawn.env } : {}),
           extendEnv: options.spawn.extendEnv ?? true,
           shell: spawnCommand.shell,
+          forceKillAfter: "5 seconds",
         }),
       )
       .pipe(
@@ -495,7 +496,7 @@ export const make = (
             Effect.gen(function* () {
               yield* Deferred.fail(stderrFailure, error);
               yield* recordTermination(error);
-              yield* child.kill({ forceKillAfter: "1 second" }).pipe(Effect.ignore);
+              yield* child.kill({ forceKillAfter: "5 seconds" }).pipe(Effect.ignore);
             }),
           ),
         ),
@@ -962,7 +963,7 @@ export const make = (
       error: EffectAcpErrors.AcpError,
     ) {
       yield* recordTermination(error);
-      yield* child.kill({ forceKillAfter: "1 second" }).pipe(Effect.ignore);
+      yield* child.kill({ forceKillAfter: "5 seconds" }).pipe(Effect.ignore);
     });
 
     const cancel = Effect.gen(function* () {
