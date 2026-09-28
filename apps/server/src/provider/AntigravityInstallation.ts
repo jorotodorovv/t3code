@@ -126,42 +126,76 @@ export interface AntigravityInstallationOptions {
   ) => Effect.Effect<void, AntigravityInstallationError, Scope.Scope>;
 }
 
-const installationError = (operation: string, detail: string, cause?: unknown) =>
-  new AntigravityInstallationError({
+/**
+ * Constructs an {@link AntigravityInstallationError} for a given operation.
+ *
+ * @param operation - The name of the installation operation that failed.
+ * @param detail - A human-readable description of the error.
+ * @param cause - Optional underlying error or defect cause.
+ */
+function installationError(operation: string, detail: string, cause?: unknown) {
+  return new AntigravityInstallationError({
     operation,
     detail,
     ...(cause === undefined ? {} : { cause }),
   });
+}
 
-function extractErrorMessage(cause: unknown): string | undefined {
+const MAX_CAUSE_MESSAGE_LENGTH = 256;
+
+/**
+ * Extracts a bounded, sanitized diagnostic message from an unknown error cause.
+ *
+ * @param cause - The unknown error cause or defect to extract a message from.
+ * @param maxLength - Maximum permitted character length for the extracted message.
+ * @returns A single-line diagnostic string if one could be extracted, or undefined.
+ */
+function extractErrorMessage(
+  cause: unknown,
+  maxLength = MAX_CAUSE_MESSAGE_LENGTH,
+): string | undefined {
   if (!cause) return undefined;
-  if (typeof cause === "string") return cause.trim() || undefined;
-  if (typeof cause === "object") {
+  let raw: string | undefined;
+  if (typeof cause === "string") {
+    raw = cause.trim();
+  } else if (typeof cause === "object") {
     if (
       "detail" in cause &&
       typeof (cause as { detail?: unknown }).detail === "string" &&
       (cause as { detail: string }).detail.trim().length > 0
     ) {
-      return (cause as { detail: string }).detail.trim();
-    }
-    if (
+      raw = (cause as { detail: string }).detail.trim();
+    } else if (
       "message" in cause &&
       typeof (cause as { message?: unknown }).message === "string" &&
       (cause as { message: string }).message.trim().length > 0
     ) {
-      return (cause as { message: string }).message.trim();
+      raw = (cause as { message: string }).message.trim();
     }
   }
-  return undefined;
+  if (!raw) return undefined;
+  const singleLine = raw.replace(/\s+/gu, " ");
+  return singleLine.length > maxLength ? `${singleLine.slice(0, maxLength)}...` : singleLine;
 }
 
-const wrapFailure = (operation: string, detail: string) => (cause: unknown) => {
-  if (isInstallationError(cause)) return cause;
-  const underlying = extractErrorMessage(cause);
-  const enrichedDetail =
-    underlying && !detail.includes(underlying) ? `${detail} (${underlying})` : detail;
-  return installationError(operation, enrichedDetail, cause);
-};
+/**
+ * Creates an error mapping function that transforms unexpected failures into
+ * {@link AntigravityInstallationError}, augmenting the high-level detail
+ * with bounded diagnostic context from the underlying cause.
+ *
+ * @param operation - The installation operation that failed.
+ * @param detail - High-level error detail explaining the failure.
+ * @returns A function that wraps an unknown cause into an AntigravityInstallationError.
+ */
+function wrapFailure(operation: string, detail: string) {
+  return (cause: unknown) => {
+    if (isInstallationError(cause)) return cause;
+    const underlying = extractErrorMessage(cause);
+    const enrichedDetail =
+      underlying && !detail.includes(underlying) ? `${detail} (${underlying})` : detail;
+    return installationError(operation, enrichedDetail, cause);
+  };
+}
 
 function executableNames(platform: NodeJS.Platform) {
   return platform === "win32"

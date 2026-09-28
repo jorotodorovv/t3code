@@ -322,14 +322,22 @@ interface AcpActivePrompt {
   readonly completed: Deferred.Deferred<void>;
 }
 
-export const make = (
+/**
+ * Creates and manages an active ACP (Agent Client Protocol) session runtime,
+ * including process lifecycle, bidirectional JSON-RPC communication, event queuing,
+ * and graceful process termination with force-kill escalation.
+ *
+ * @param options - Configuration options for the ACP session runtime.
+ * @returns An effect providing the initialized AcpSessionRuntime service.
+ */
+export function make(
   options: AcpSessionRuntimeOptions,
 ): Effect.Effect<
   AcpSessionRuntime["Service"],
   EffectAcpErrors.AcpError,
   ChildProcessSpawner.ChildProcessSpawner | Crypto.Crypto | Scope.Scope
-> =>
-  Effect.gen(function* () {
+> {
+  return Effect.gen(function* () {
     const crypto = yield* Crypto.Crypto;
     const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
     const runtimeScope = yield* Scope.Scope;
@@ -959,6 +967,11 @@ export const make = (
       yield* Effect.raceFirst(Deferred.await(acknowledge), Deferred.await(runtimeClosed));
     });
 
+    /**
+     * Records process termination with the given error and initiates child process shutdown.
+     *
+     * @param error - The ACP error triggering runtime retirement.
+     */
     const retireRuntime = Effect.fn("AcpSessionRuntime.retireRuntime")(function* (
       error: EffectAcpErrors.AcpError,
     ) {
@@ -1133,7 +1146,14 @@ export const make = (
         ensureConnected.pipe(Effect.andThen(acp.raw.notify(method, payload))),
     } satisfies AcpSessionRuntime["Service"];
   });
+}
 
+/**
+ * Creates a layer that provides the AcpSessionRuntime service.
+ *
+ * @param options - Configuration options for the ACP session runtime.
+ * @returns A layer providing the initialized AcpSessionRuntime service.
+ */
 export const layer = (
   options: AcpSessionRuntimeOptions,
 ): Layer.Layer<
