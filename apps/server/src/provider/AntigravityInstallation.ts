@@ -3,6 +3,7 @@ import * as EffectNodeStream from "@effect/platform-node/NodeStream";
 import { ProviderDriverKind, type ProviderInstallState } from "@t3tools/contracts";
 import * as HostProcess from "@t3tools/shared/HostProcess";
 import { resolveNodeExecutable, nodeRuntimeUnavailableMessage } from "@t3tools/shared/nodeRuntime";
+import { resolveCommandPath } from "@t3tools/shared/shell";
 import * as Clock from "effect/Clock";
 import * as Cause from "effect/Cause";
 import * as Context from "effect/Context";
@@ -145,7 +146,7 @@ function executableNames(platform: NodeJS.Platform) {
 /** Antigravity CLI 1.5.0+ serves ACP itself (`agy acp`), so it has no `localharness_external` sibling. */
 function isAntigravityCli(...candidates: ReadonlyArray<string>) {
   return candidates.some((candidate) =>
-    /^(?:agy|antigravity)(?:\.exe)?$/iu.test(candidate.split(/[\\/]/u).at(-1) ?? ""),
+    /^(?:agy|antigravity)(?:\.(?:exe|cmd|bat))?$/iu.test(candidate.split(/[\\/]/u).at(-1) ?? ""),
   );
 }
 
@@ -260,11 +261,19 @@ export const makeAntigravityInstallation = Effect.fn("AntigravityInstallation.ma
   ) {
     if (!(yield* executableFile(candidate))) return null;
     const executablePath = yield* fs.realPath(candidate);
+    // Keep launcher symlinks intact: version-manager shims dispatch by their invoked name.
+    if (isAntigravityCli(candidate, executablePath)) {
+      return {
+        executablePath: candidate,
+        harnessPath: null,
+        source,
+        version: null,
+        managedVersionDirectory: null,
+      } satisfies AntigravityExecutable;
+    }
     const directory = path.dirname(executablePath);
-    const harnessPath = isAntigravityCli(candidate, executablePath)
-      ? null
-      : path.join(directory, names.harness);
-    if (harnessPath !== null && !(yield* executableFile(harnessPath))) return null;
+    const harnessPath = path.join(directory, names.harness);
+    if (!(yield* executableFile(harnessPath))) return null;
     const realVersions = yield* fs.realPath(versionsDirectory).pipe(Effect.option);
     if (
       Option.isSome(realVersions) &&
@@ -283,19 +292,17 @@ export const makeAntigravityInstallation = Effect.fn("AntigravityInstallation.ma
     } satisfies AntigravityExecutable;
   });
 
-  const pathCandidates = (binary: string, processEnvironment = environment) => {
-    const pathValue =
-      platform === "win32"
-        ? Object.entries(processEnvironment).findLast(([key]) => key.toUpperCase() === "PATH")?.[1]
-        : processEnvironment.PATH;
-    const names =
-      platform === "win32" && path.extname(binary) === "" ? [binary, `${binary}.exe`] : [binary];
-    return (pathValue ?? "")
-      .split(platform === "win32" ? ";" : ":")
-      .map((directory) => directory.trim().replace(/^"|"$/gu, ""))
-      .filter((directory) => directory.length > 0)
-      .flatMap((directory) => names.map((name) => path.resolve(directory, name)));
-  };
+  const commandPath = Effect.fn("AntigravityInstallation.commandPath")(function* (
+    command: string,
+    processEnvironment = environment,
+  ) {
+    const resolved = yield* resolveCommandPath(command, { env: processEnvironment }).pipe(
+      Effect.provideService(HostProcess.Platform, platform),
+      Effect.provideService(FileSystem.FileSystem, fs),
+      Effect.provideService(Path.Path, path),
+    );
+    return resolved === null ? null : path.resolve(resolved);
+  });
 
   const resolve: AntigravityInstallationService["resolve"] = Effect.fn(
     "AntigravityInstallation.resolve",
@@ -303,14 +310,9 @@ export const makeAntigravityInstallation = Effect.fn("AntigravityInstallation.ma
     function* (binaryPath?: string, processEnvironment?: NodeJS.ProcessEnv) {
       const override = binaryPath?.trim();
       if (override) {
-        const candidates =
-          path.isAbsolute(override) || override.includes("/") || override.includes("\\")
-            ? [path.resolve(override)]
-            : pathCandidates(override, processEnvironment);
-        for (const candidate of candidates) {
-          const selected = yield* fromExternal(candidate, "override");
-          if (selected) return selected;
-        }
+        const candidate = yield* commandPath(override, processEnvironment);
+        const selected = candidate === null ? null : yield* fromExternal(candidate, "override");
+        if (selected) return selected;
         return yield* installationError(
           "resolve",
           "The custom Antigravity executable is missing or not executable, or it needs a localharness_external sibling. The agy CLI does not.",
@@ -320,10 +322,9 @@ export const makeAntigravityInstallation = Effect.fn("AntigravityInstallation.ma
         const active = yield* readRecord(activePath, ActiveRelease);
         return yield* completedRelease(active.releaseId);
       }
-      for (const candidate of pathCandidates(names.executable, processEnvironment)) {
-        const selected = yield* fromExternal(candidate, "path");
-        if (selected) return selected;
-      }
+      const candidate = yield* commandPath(names.executable, processEnvironment);
+      const selected = candidate === null ? null : yield* fromExternal(candidate, "path");
+      if (selected) return selected;
       return yield* installationError(
         "resolve",
         releaseAsset

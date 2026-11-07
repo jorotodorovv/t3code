@@ -661,26 +661,38 @@ it.layer(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer))("Antigravity inst
           version: null,
         });
         expect(yield* installation.resolve(alias)).toMatchObject({
-          executablePath: cli,
+          executablePath: alias,
           harnessPath: null,
         });
         expect(yield* installation.resolve("agy", { PATH: cliDirectory })).toMatchObject({
-          executablePath: cli,
+          executablePath: alias,
           harnessPath: null,
         });
         expect(yield* installation.resolve(other).pipe(Effect.flip)).toMatchObject({
           operation: "resolve",
         });
 
-        const windowsDirectory = path.join(baseDir, "windows");
-        yield* fs.makeDirectory(windowsDirectory);
-        const windowsCli = path.join(windowsDirectory, "agy.exe");
-        yield* fs.writeFileString(windowsCli, "cli");
-        const { installation: windows } = yield* makeHarness({ baseDir, platform: "win32" });
-        expect(yield* windows.resolve("agy", { PATH: windowsDirectory })).toMatchObject({
-          executablePath: windowsCli,
+        // Version-manager shims dispatch by their invoked name, so the shim path is what runs.
+        const shims = path.join(baseDir, "shims");
+        const mise = path.join(baseDir, "mise");
+        yield* fs.makeDirectory(shims);
+        yield* fs.writeFileString(mise, "mise", { mode: 0o755 });
+        yield* fs.symlink(mise, path.join(shims, "agy"));
+        expect(yield* installation.resolve("agy", { PATH: shims })).toMatchObject({
+          executablePath: path.join(shims, "agy"),
           harnessPath: null,
         });
+
+        const { installation: windows } = yield* makeHarness({ baseDir, platform: "win32" });
+        for (const name of ["agy.EXE", "agy.cmd"]) {
+          const windowsDirectory = path.join(baseDir, `windows-${name}`);
+          yield* fs.makeDirectory(windowsDirectory);
+          yield* fs.writeFileString(path.join(windowsDirectory, name), "cli");
+          expect(yield* windows.resolve("agy", { PATH: windowsDirectory })).toMatchObject({
+            executablePath: path.join(windowsDirectory, name),
+            harnessPath: null,
+          });
+        }
       }),
   );
 
