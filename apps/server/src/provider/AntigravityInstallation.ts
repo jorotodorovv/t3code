@@ -288,11 +288,13 @@ export const makeAntigravityInstallation = Effect.fn("AntigravityInstallation.ma
       platform === "win32"
         ? Object.entries(processEnvironment).findLast(([key]) => key.toUpperCase() === "PATH")?.[1]
         : processEnvironment.PATH;
+    const names =
+      platform === "win32" && path.extname(binary) === "" ? [binary, `${binary}.exe`] : [binary];
     return (pathValue ?? "")
       .split(platform === "win32" ? ";" : ":")
       .map((directory) => directory.trim().replace(/^"|"$/gu, ""))
       .filter((directory) => directory.length > 0)
-      .map((directory) => path.resolve(directory, binary));
+      .flatMap((directory) => names.map((name) => path.resolve(directory, name)));
   };
 
   const resolve: AntigravityInstallationService["resolve"] = Effect.fn(

@@ -671,6 +671,16 @@ it.layer(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer))("Antigravity inst
         expect(yield* installation.resolve(other).pipe(Effect.flip)).toMatchObject({
           operation: "resolve",
         });
+
+        const windowsDirectory = path.join(baseDir, "windows");
+        yield* fs.makeDirectory(windowsDirectory);
+        const windowsCli = path.join(windowsDirectory, "agy.exe");
+        yield* fs.writeFileString(windowsCli, "cli");
+        const { installation: windows } = yield* makeHarness({ baseDir, platform: "win32" });
+        expect(yield* windows.resolve("agy", { PATH: windowsDirectory })).toMatchObject({
+          executablePath: windowsCli,
+          harnessPath: null,
+        });
       }),
   );
 
