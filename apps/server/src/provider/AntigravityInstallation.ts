@@ -75,7 +75,8 @@ const isAcpProcessExitedError = Schema.is(EffectAcpErrors.AcpProcessExitedError)
 
 export interface AntigravityExecutable {
   readonly executablePath: string;
-  readonly harnessPath: string;
+  /** Null for the `agy` CLI, which embeds the harness and runs as `agy acp`. */
+  readonly harnessPath: string | null;
   readonly source: "override" | "managed" | "path";
   readonly version: string | null;
   readonly managedVersionDirectory: string | null;
@@ -139,6 +140,13 @@ function executableNames(platform: NodeJS.Platform) {
   return platform === "win32"
     ? { executable: "agy_acp_server.exe", harness: "localharness_external.exe" }
     : { executable: "agy_acp_server.par", harness: "localharness_external" };
+}
+
+/** Antigravity CLI 1.5.0+ serves ACP itself (`agy acp`), so it has no `localharness_external` sibling. */
+function isAntigravityCli(...candidates: ReadonlyArray<string>) {
+  return candidates.some((candidate) =>
+    /^(?:agy|antigravity)(?:\.exe)?$/iu.test(candidate.split(/[\\/]/u).at(-1) ?? ""),
+  );
 }
 
 function isRunning(state: ProviderInstallState) {
@@ -253,8 +261,10 @@ export const makeAntigravityInstallation = Effect.fn("AntigravityInstallation.ma
     if (!(yield* executableFile(candidate))) return null;
     const executablePath = yield* fs.realPath(candidate);
     const directory = path.dirname(executablePath);
-    const harnessPath = path.join(directory, names.harness);
-    if (!(yield* executableFile(harnessPath))) return null;
+    const harnessPath = isAntigravityCli(candidate, executablePath)
+      ? null
+      : path.join(directory, names.harness);
+    if (harnessPath !== null && !(yield* executableFile(harnessPath))) return null;
     const realVersions = yield* fs.realPath(versionsDirectory).pipe(Effect.option);
     if (
       Option.isSome(realVersions) &&
@@ -301,7 +311,7 @@ export const makeAntigravityInstallation = Effect.fn("AntigravityInstallation.ma
         }
         return yield* installationError(
           "resolve",
-          "The custom Antigravity executable or its localharness_external sibling is missing or not executable.",
+          "The custom Antigravity executable is missing or not executable, or it needs a localharness_external sibling. The agy CLI does not.",
         );
       }
       if (yield* fs.exists(activePath)) {
