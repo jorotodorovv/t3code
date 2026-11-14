@@ -76,7 +76,9 @@ export const isAntigravityTextGenerationAvailable = Effect.fn(
     if (info.type !== "File" || info.size > 64_000n) {
       return false;
     }
+    // Antigravity's own profile migration leaves a zero-byte mcp_config.json behind.
     const empty = yield* fs.readFileString(configurationPath).pipe(
+      Effect.map((text) => (text.trim() === "" ? "{}" : text)),
       Effect.flatMap(decodeConfiguration),
       Effect.flatMap((configuration) =>
         decodeConfigurationObject(
